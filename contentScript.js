@@ -129,7 +129,18 @@ async function fillAllCombinations(options, button, qNum) {
             clicked = true;
         }
         document.getElementById(bid).click();
-        await delay(500);
+        
+        try {
+            // Wait for the button to become re-enabled
+            await waitForButtonToEnable(bid);
+            console.log('Button has re-enabled, request likely processed.');
+    
+            // Now you can check for the explanation or other indicators of success/failure
+            // checkForExplanation(questionId); or any other logic you need to execute
+    
+        } catch (error) {
+            console.error(error);
+        }
         const res = await checkForExplanation(qid);
         if (res) {
             console.log("YES CORRECT ANSWER FOUND");
@@ -172,14 +183,6 @@ function scrollToElement(element) {
 
 
 async function exploreAllCombinations(qNum, questions, numToIds, submitButton) {
-    // Example: 4 questions each with 4 options (A, B, C, D)
-    const options = [
-        ['A', 'B', 'C', 'D'], // Choices for question 1
-        ['A', 'B', 'C', 'D'], // Choices for question 2
-        ['A', 'B', 'C', 'D'], // Choices for question 3
-        ['A', 'B', 'C', 'D']  // Choices for question 4
-    ];
-
     // need to create list of options ids for each question
     const combinations = [];
 
@@ -203,4 +206,34 @@ async function exploreAllCombinations(qNum, questions, numToIds, submitButton) {
     await fillAllCombinations(allCombinations, submitButton, qNum);
 }
 
-  
+
+function waitForButtonToEnable(buttonId) {
+    return new Promise((resolve, reject) => {
+        const button = document.getElementById(buttonId);
+
+        // Immediately resolve if the button is already enabled
+        if (!button.disabled) {
+            resolve();
+            return;
+        }
+
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'disabled' && !button.disabled) {
+                    observer.disconnect(); // Stop observing
+                    resolve(); // Resolve the promise
+                }
+            });
+        });
+
+        observer.observe(button, {
+            attributes: true, // Watch for attribute changes
+        });
+
+        // Reject the promise if the button doesn't enable within a certain timeout
+        setTimeout(() => {
+            observer.disconnect();
+            reject(new Error('Button did not re-enable within the timeout period.'));
+        }, 10000); // Adjust timeout as needed
+    });
+}
