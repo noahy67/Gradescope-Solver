@@ -41,12 +41,10 @@ async function collectFormElementsMultipleChoice() {
 
     // dict mapping question number to all its ids
     const numToIds = {};
-    
-    
 
      // Collect all radio button inputs
      // <input type="radio" id="questions_32788995__0_True" name="questions[32788995][0]" tabindex="-1" value="True">
-    const radioButtons = document.querySelectorAll('input[type="radio"]');
+    const radioButtons = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
     radioButtons.forEach(button => {
         // Assuming the id or name attributes contain information about question grouping
         questionIds.add(button.name);
@@ -58,7 +56,8 @@ async function collectFormElementsMultipleChoice() {
         questions[button.name].push({
             id: button.id,
             name: button.name,
-            value: button.value
+            value: button.value,
+            type: button.type
         });
 
         // numberToIds
@@ -115,54 +114,92 @@ async function generatePermutations(options, depth, current, all) {
     }
 }
 
+// generates all the SATA combinations
+async function generateSATACombinations(options) {
+    let combinations = [[]]; // Start with an empty combination
+    for (let i = 0; i < options.length; i++) {
+        let newCombinations = [];
+        // For each existing combination, add one without the current option and one with it
+        combinations.forEach(comb => {
+            newCombinations.push([...comb]); // Not including the current option
+            newCombinations.push([...comb, options[i].id]); // Including the current option
+        });
+        combinations = newCombinations; // Update the list of combinations
+    }
+    return combinations;
+}
+
 // actually try each option
 async function fillAllCombinations(options, button, qNum) {
     const qid = "question_" + qNum;
     const bid = "submit_question_" + qNum;
     var clicked = false;
+
+    // Preliminary check just in case answer is already correct
+    const initialCheck = await checkForExplanation(qid);
+    if (initialCheck) {
+        console.log("YES CORRECT ANSWER FOUND");
+        return;
+    }
+
+    // Assume all options within a single question group are of the same type (all checkboxes for SATA)
+    // Fetch all checkboxes related to this question group to reset them before each permutation
+    // This selector might need adjustment to precisely target your checkboxes
+    const allCheckboxes = document.querySelectorAll(`#${qid} input[type='checkbox']`);
+
     for (const permutation of options) {
-        for (const choice of permutation) {
-            document.getElementById(choice).click();
+        // Reset all checkboxes before applying the new permutation
+        allCheckboxes.forEach(checkbox => {
+            if (checkbox.checked === true) {
+                checkbox.click();
+            }
+        });
+
+        console.log("permutation: ", permutation)
+        // Apply the new permutation by checking the required options
+        for (const choiceId of permutation) {
+            const choiceElement = document.getElementById(choiceId);
+            // click the element
+            console.log("choiceEleemtn: ", choiceElement)
+            if (choiceElement) {
+                choiceElement.click();
+            }
         }
+
         if (!clicked) {
             scrollToElement(document.getElementById(bid));
             clicked = true;
         }
+        console.log("PRESSING BUTTON: ", bid)
         document.getElementById(bid).click();
         
         try {
             // Wait for the button to become re-enabled
-            await waitForButtonToEnable(bid);
-            console.log('Button has re-enabled, request likely processed.');
-    
-            // Now you can check for the explanation or other indicators of success/failure
-            // checkForExplanation(questionId); or any other logic you need to execute
-    
+            await waitForButtonToEnable(bid);    
+            // Check for the explanation or other indicators of success/failure
+            const checkResult = await checkForExplanation(qid);
+            if (checkResult) {
+                console.log("CORRECT ANSWER FOUND");
+                return;
+            }
         } catch (error) {
             console.error(error);
-        }
-        const res = await checkForExplanation(qid);
-        if (res) {
-            console.log("YES CORRECT ANSWER FOUND");
-            return;
         }
     }
     console.log("finished fillAllCombos for: ", qid);
 }
 
+
 // checks if there is an explanation element present in the question div
 async function checkForExplanation(questionId) {
     // Assuming `questionId` is the id attribute value of the question container div.
-    console.log("checkForExp qid: ", questionId);
     const questionDiv = document.getElementById(questionId);
     if (questionDiv) {
         // Check if there's a div with class 'question--feedbackContainer' within this question.
         const explanationDiv = questionDiv.querySelector('.question--feedbackContainer');
         if (explanationDiv) {
-            console.log('Explanation found for question:', questionId);
             return true; // Explanation is present
         } else {
-            console.log('No explanation found for question:', questionId);
             return false; // Explanation is not present
         }
     } else {
@@ -180,6 +217,39 @@ function scrollToElement(element) {
         });
     }
 }
+// TEST
+function generateCombinations(optionsList, depth = 0, currentCombination = [], allCombinations = []) {
+    // Base case
+    if (depth === optionsList.length) {
+        allCombinations.push([...currentCombination]);
+        return;
+    }
+
+    const currentOptions = optionsList[depth];
+    // Check if it's a single-choice question (MCQ)
+    if (currentOptions[0].type === 'radio') {
+        for (const option of currentOptions) {
+            currentCombination[depth] = option.id;
+            generateCombinations(optionsList, depth + 1, currentCombination, allCombinations);
+            currentCombination.pop();
+        }
+    } else { // Handling SATA: "checkbox"
+        // Generate combinations including and excluding each option
+        // This step ensures every possible combination of selections is considered
+        const generateForSATA = (index = 0, combo = []) => {
+            if (index === currentOptions.length) {
+                // Once all options are considered, push the current combo and return
+                generateCombinations(optionsList, depth + 1, [...currentCombination, ...combo], allCombinations);
+                return;
+            }
+            // Exclude current option
+            generateForSATA(index + 1, combo);
+            // Include current option
+            generateForSATA(index + 1, [...combo, currentOptions[index].id]);
+        };
+        generateForSATA();
+    }
+}
 
 
 async function exploreAllCombinations(qNum, questions, numToIds, submitButton) {
@@ -189,7 +259,7 @@ async function exploreAllCombinations(qNum, questions, numToIds, submitButton) {
     for (const qid of numToIds[qNum]) {
         const temp = [];
         for (const option of questions[qid]) {
-            temp.push(option.id);
+            temp.push(option);
         }
         combinations.push(temp);
     }
@@ -197,7 +267,8 @@ async function exploreAllCombinations(qNum, questions, numToIds, submitButton) {
 
 
     let allCombinations = [];
-    await generatePermutations(combinations, 0, [], allCombinations);
+    // await generatePermutations(combinations, 0, [], allCombinations);
+    generateCombinations(combinations, 0, [], allCombinations);
 
     console.log("All combinations:", allCombinations);
     console.log("Total combinations:", allCombinations.length);
